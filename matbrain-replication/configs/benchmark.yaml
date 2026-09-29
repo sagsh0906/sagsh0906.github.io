@@ -1,0 +1,23 @@
+# Systems compared in the leakage-controlled benchmark (Fig. 3, Supplementary Tables 5-7).
+# All tool-using systems share: the same prompts, the Mat-MCP tool pool without target-DB
+# retrieval, a 12-call budget, temperature 0 and the same output parser.
+systems:
+  Mat-R1:
+    system_prompt: mat_r1
+    backend: {model: Mat-R1, base_url: "http://localhost:8002/v1", api_key: EMPTY, max_tokens: 8192}
+  Mat-R1-base:            # Qwen3-30B-A3B
+    backend: {model: Qwen/Qwen3-30B-A3B, base_url: "http://localhost:8012/v1", api_key: EMPTY, max_tokens: 8192}
+  Mat-T1:
+    backend: {model: Mat-T1, base_url: "http://localhost:8001/v1", api_key: EMPTY, max_tokens: 4096}
+  Mat-T1-base:            # Qwen3-14B
+    backend: {model: Qwen/Qwen3-14B, base_url: "http://localhost:8011/v1", api_key: EMPTY, max_tokens: 4096}
+  MatBrain:
+    executor: Mat-T1
+    reasoner: Mat-R1
+    max_iterations: 6
+  GPT-5:
+    backend: {model: gpt-5, api_key_env: OPENAI_API_KEY}
+  Gemini-2.5-Pro:         # OpenAI-compatible Gemini endpoint
+    backend: {model: gemini-2.5-pro, base_url: "https://generativelanguage.googleapis.com/v1beta/openai/", api_key_env: GEMINI_API_KEY}
+  DeepSeek-R1:
+    backend: {model: deepseek-reasoner, base_url: "https://api.deepseek.com", api_key_env: DEEPSEEK_API_KEY}

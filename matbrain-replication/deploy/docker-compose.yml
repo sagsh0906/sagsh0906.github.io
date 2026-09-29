@@ -1,0 +1,34 @@
+# Local MatBrain stack: Mat-MCP tool server + vLLM servers for Mat-T1 and Mat-R1.
+# Paper deployment target: a workstation with RTX 4090 GPUs (Supplementary Table 4).
+services:
+  mat-mcp:
+    build: {context: .., dockerfile: deploy/Dockerfile}
+    ports: ["8000:8000"]
+    environment:
+      - MP_API_KEY=${MP_API_KEY:-}
+      - SEARXNG_URL=${SEARXNG_URL:-http://searxng:8080}
+      - MATBRAIN_REFERENCE_ENTRIES=${MATBRAIN_REFERENCE_ENTRIES:-}
+    volumes: ["../data/artifacts:/artifacts"]
+
+  searxng:
+    image: searxng/searxng:latest
+    ports: ["8080:8080"]
+
+  mat-t1:
+    image: vllm/vllm-openai:latest
+    command: >
+      --model /models/Mat-T1 --served-model-name Mat-T1 --port 8001
+      --enable-auto-tool-choice --tool-call-parser hermes --reasoning-parser qwen3
+      --max-model-len 32768 --tensor-parallel-size 1
+    ports: ["8001:8001"]
+    volumes: ["${MODEL_DIR:-../checkpoints}:/models"]
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, device_ids: ["0"], capabilities: [gpu]}]}}}
+
+  mat-r1:
+    image: vllm/vllm-openai:latest
+    command: >
+      --model /models/Mat-R1 --served-model-name Mat-R1 --port 8002
+      --reasoning-parser qwen3 --max-model-len 32768 --tensor-parallel-size 2
+    ports: ["8002:8002"]
+    volumes: ["${MODEL_DIR:-../checkpoints}:/models"]
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, device_ids: ["1", "2"], capabilities: [gpu]}]}}}
