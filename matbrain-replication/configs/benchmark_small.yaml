@@ -1,0 +1,18 @@
+# Small-scale validation (docs/small_scale_validation.md): mini models served by vLLM.
+systems:
+  Mat-R1-mini:            # Qwen3-4B + LoRA SFT
+    system_prompt: mat_r1
+    backend: {model: Mat-R1-mini, base_url: "http://localhost:8002/v1", api_key: EMPTY, max_tokens: 8192}
+  Qwen3-4B-base:
+    backend: {model: Qwen3-4B, base_url: "http://localhost:8012/v1", api_key: EMPTY, max_tokens: 8192}
+  Mat-T1-mini:            # Qwen3-1.7B + multi-turn RL
+    backend: {model: Mat-T1-mini, base_url: "http://localhost:8001/v1", api_key: EMPTY, max_tokens: 4096}
+  Qwen3-1.7B-base:
+    backend: {model: Qwen3-1.7B, base_url: "http://localhost:8011/v1", api_key: EMPTY, max_tokens: 4096}
+  MatBrain-mini:
+    executor: Mat-T1-mini
+    reasoner: Mat-R1-mini
+    max_iterations: 6
+  # Optional commercial reference on the same 100-record sample (~CNY 50-150).
+  DeepSeek-flash:
+    backend: {model: deepseek-chat, base_url: "https://api.deepseek.com", api_key_env: DEEPSEEK_API_KEY}

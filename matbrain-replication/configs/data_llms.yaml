@@ -1,0 +1,12 @@
+# LLMs used to build Mat-SFT / Mat-252K-SFT (paper Methods, "Construction of dataset").
+# Chunk classification: three-model ensemble with majority vote.
+classifiers:
+  - {name: deepseek-v3, model: deepseek-chat, base_url: "https://api.deepseek.com", api_key_env: DEEPSEEK_API_KEY}
+  - {name: gpt-4o, model: gpt-4o, api_key_env: OPENAI_API_KEY}
+  - {name: claude-3.5, model: claude-3-5-sonnet-latest, base_url: "https://api.anthropic.com/v1/", api_key_env: ANTHROPIC_API_KEY}
+
+# Generate-distil teachers.
+teachers:
+  question: {name: deepseek-v3, model: deepseek-chat, base_url: "https://api.deepseek.com", api_key_env: DEEPSEEK_API_KEY, temperature: 0.7}
+  answer: {name: deepseek-r1, model: deepseek-reasoner, base_url: "https://api.deepseek.com", api_key_env: DEEPSEEK_API_KEY}
+  judge: {name: deepseek-r1-judge, model: deepseek-reasoner, base_url: "https://api.deepseek.com", api_key_env: DEEPSEEK_API_KEY}

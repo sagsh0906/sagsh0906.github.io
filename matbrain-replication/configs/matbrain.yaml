@@ -1,0 +1,22 @@
+# MatBrain runtime configuration (models served by vLLM, see deploy/serve_models.sh)
+mat_t1:
+  model: Mat-T1
+  base_url: http://localhost:8001/v1
+  api_key: EMPTY
+  temperature: 0.0
+  max_tokens: 4096
+mat_r1:
+  model: Mat-R1
+  base_url: http://localhost:8002/v1
+  api_key: EMPTY
+  temperature: 0.0
+  max_tokens: 8192
+
+max_iterations: 6        # recursion bound of the graph (paper default)
+max_tool_calls: 12       # per Mat-T1 execution (benchmark budget)
+start_with_analysis: false  # true: Mat-R1 first decides whether tools are needed (Fig. 1b)
+
+tools:
+  mcp_url: null          # e.g. http://mat-mcp:8000/mcp to use the containerised server
+  disable_target_db: false
+  exclude: []

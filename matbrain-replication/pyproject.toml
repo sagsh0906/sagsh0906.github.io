@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "matbrain-replication"
+version = "0.1.0"
+description = "Open replication of MatBrain (Nat. Mach. Intell. 2026, doi:10.1038/s42256-026-01298-6): dual-model agent (Mat-R1 + Mat-T1) with the Mat-MCP materials toolkit."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pymatgen>=2024.1.1",
+    "pydantic>=2.5",
+    "pyyaml>=6",
+    "httpx>=0.25",
+]
+
+[project.optional-dependencies]
+# MatBrain orchestration + MCP server
+agent = ["langgraph>=0.2", "openai>=1.40", "mcp>=1.2"]
+# data pipeline and evaluation
+data = ["pandas>=2", "pyarrow>=14", "scikit-learn>=1.3", "mp-api>=0.41", "matplotlib>=3.7"]
+# ML property / structure tools used inside Mat-MCP (GPU recommended)
+tools = ["matgl>=1.1", "chgnet>=0.3", "ase>=3.22"]
+# entropy analysis with local HF models
+analysis = ["torch>=2.1", "transformers>=4.51", "matplotlib>=3.7", "scikit-learn>=1.3"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+mat-mcp = "matbrain.mcp.server:main"
+matbrain = "matbrain.agent.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["matbrain*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning"]

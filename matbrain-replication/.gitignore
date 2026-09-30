@@ -1,0 +1,12 @@
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+/data/
+/checkpoints/
+/results/
+/vasp_runs/
+wandb/
+env.sh
+logs/
+models/
