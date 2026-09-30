@@ -9,7 +9,7 @@ grain-size-distribution statistics used for the bimodality analysis (Fig. 5).
 import numpy as np
 from scipy import ndimage
 from skimage.measure import regionprops_table
-from skimage.segmentation import expand_labels
+from skimage.segmentation import expand_labels, watershed
 
 from . import euler as E
 
@@ -32,8 +32,34 @@ def boundary_mask(img, dark_thresh=0.15):
     return to_float_rgb(img).max(axis=-1) < dark_thresh
 
 
-def segment_grains(img, dark_thresh=0.15, min_px=3, fill_boundaries=False):
-    """Connected components (4-connectivity) of non-boundary pixels. Label 0 = boundary/removed."""
+def _watershed(img, t_low=0.04, sigma=0.7, dark_thresh=0.15, min_marker=4):
+    """Marker-controlled watershed on the Euler-colour gradient (dark boundary pixels count as ridges)."""
+    sm = np.stack([ndimage.gaussian_filter(img[..., c], sigma) for c in range(3)], -1)
+    g = np.sqrt(((ndimage.sobel(sm, axis=1) / 8) ** 2 + (ndimage.sobel(sm, axis=0) / 8) ** 2).sum(-1))
+    g[img.max(axis=-1) < dark_thresh] = g.max() + 1.0
+    markers, _ = ndimage.label(g < t_low)
+    counts = np.bincount(markers.ravel())
+    small = counts < min_marker
+    small[0] = False
+    markers[small[markers]] = 0
+    if markers.max() == 0:
+        return np.zeros(img.shape[:2], int)
+    return watershed(g, markers)
+
+
+def segment_grains(img, dark_thresh=0.15, min_px=3, fill_boundaries=False, method='dark', t_low=0.04):
+    """Grain labels (0 = boundary / removed).
+
+    method='dark'      : connected components (4-connectivity) of non-boundary pixels, i.e. grains delimited by the
+                         black boundary lines of an EBSD Euler map (exact for the original / synthetic maps);
+    method='watershed' : marker-controlled watershed on the colour gradient; also works on blurry reconstructions
+                         without crisp black lines, and is used whenever originals and reconstructions / generated
+                         images are compared with one common operator (it merges the finest grains and twins).
+    """
+    img = to_float_rgb(img)
+    if method == 'watershed':
+        labels = _watershed(img, t_low=t_low, dark_thresh=dark_thresh)
+        return expand_labels(labels, 1) if fill_boundaries else labels
     gb = boundary_mask(img, dark_thresh)
     labels, _ = ndimage.label(~gb)
     if min_px > 1:

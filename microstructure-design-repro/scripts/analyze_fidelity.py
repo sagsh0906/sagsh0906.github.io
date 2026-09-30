@@ -37,7 +37,7 @@ def image_losses(a, b):
 
 
 def feature_matrix(images, pixel_um):
-    return np.array([mean_features(im, pixel_um=pixel_um) for im in images])
+    return np.array([mean_features(im, pixel_um=pixel_um, method=SEG) for im in images])
 
 
 def aggregate(F, n_maps=25, n_patches=80):
@@ -59,12 +59,18 @@ def agg_metrics(Fo, Fr, idx):
     return out
 
 
+SEG = 'watershed'   # common grain segmentation for originals and reconstructions (see features.segment_grains)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--work', default='work/quick')
     ap.add_argument('--out', default='results/synthetic')
     ap.add_argument('--no-ddpm', action='store_true')
+    ap.add_argument('--seg', choices=['watershed', 'dark'], default='watershed')
     args = ap.parse_args()
+    global SEG
+    SEG = args.seg
     os.makedirs(args.out, exist_ok=True)
     P.setup()
     plt = P.plt
@@ -148,7 +154,7 @@ def main():
     # ---- Fig. 3a-h: one random test patch, six-feature distributions
     best = list(models)[-1]
     k = sel[0]
-    to, tr = grain_table(orig[k], pixel_um=pixel_um), grain_table(models[best][k], pixel_um=pixel_um)
+    to, tr = grain_table(orig[k], pixel_um=pixel_um, method=SEG), grain_table(models[best][k], pixel_um=pixel_um, method=SEG)
     fig = plt.figure(figsize=(11, 4.2))
     gs = fig.add_gridspec(2, 4)
     for j, (im, title) in enumerate(((orig[k], 'original'), (models[best][k], 'reconstructed'))):
@@ -210,11 +216,11 @@ def main():
     # ---- Supp. Fig. 4: neighbour misorientation distributions on the test maps
     fig, ax = plt.subplots(figsize=(4.6, 3.2))
     bins = np.linspace(0, 63, 22)
-    mis_o = np.concatenate([neighbour_misorientations(im) for im in orig[is_test]] + [np.zeros(0)])
+    mis_o = np.concatenate([neighbour_misorientations(im, method=SEG) for im in orig[is_test]] + [np.zeros(0)])
     ax.hist(mis_o, bins=bins, density=True, color=P.GRAY, alpha=0.45, label='original')
     metrics['misorientation_twin_fraction'] = {'original': float(np.mean(np.abs(mis_o - 60) < 3))}
     for (mname, rec), col in zip(models.items(), (P.BLUE, P.ORANGE, P.AQUA)):
-        mis = np.concatenate([neighbour_misorientations(im) for im in rec[is_test]] + [np.zeros(0)])
+        mis = np.concatenate([neighbour_misorientations(im, method=SEG) for im in rec[is_test]] + [np.zeros(0)])
         h, _ = np.histogram(mis, bins=bins, density=True)
         ax.step(bins[:-1], h, where='post', c=col, lw=1.5, label=mname)
         metrics['misorientation_twin_fraction'][mname] = float(np.mean(np.abs(mis - 60) < 3))
@@ -234,8 +240,8 @@ def main():
     alphas = np.linspace(0, 2, 21)
     path = np.array([(1 - a) * Z[m1] + a * Z[m2] for a in alphas])
     path_imgs = quantize(decode(vae_main, path, ddpm, out_size=patch))
-    feats = np.array([mean_features(im, pixel_um=pixel_um) for im in path_imgs])
-    ngr = [len(grain_table(im, pixel_um=pixel_um)['area']) for im in path_imgs]
+    feats = np.array([mean_features(im, pixel_um=pixel_um, method=SEG) for im in path_imgs])
+    ngr = [len(grain_table(im, pixel_um=pixel_um, method=SEG)['area']) for im in path_imgs]
     fig = plt.figure(figsize=(12, 6.2))
     gs = fig.add_gridspec(3, 11)
     ax = fig.add_subplot(gs[:2, :4])

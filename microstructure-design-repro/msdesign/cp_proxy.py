@@ -23,7 +23,7 @@ import numpy as np
 from skimage.segmentation import expand_labels
 
 from . import euler as E
-from .features import grain_table, kam_map, segment_grains, PIXEL_UM
+from .features import boundary_mask, grain_table, kam_map, segment_grains, PIXEL_UM
 
 
 @dataclass
@@ -44,13 +44,15 @@ class CPParams:
     kam_max_deg: float = 8.0           # KAM kernel threshold (larger misorientations = boundaries)
     lamella_aspect: float = 3.0        # thin (twin) lamellae are not counted as fine grains for HDI
     post_uniform: float = 0.22         # engineering strain added after necking onset
+    seg_method: str = 'watershed'      # grain segmentation used for every image (see features.segment_grains)
     eps_max: float = 1.2
     n_steps: int = 2400
 
 
 def grain_inputs(img, params=CPParams(), pixel_um=PIXEL_UM):
     """Extract per-grain inputs (area fraction, size, Sachs factor, initial rho, hetero-interface fraction)."""
-    labels = segment_grains(img)
+    labels = segment_grains(img, method=params.seg_method)
+    labels[boundary_mask(img)] = 0                   # boundary / non-indexed pixels take no part in KAM
     labels_full = expand_labels(labels, distance=3)
     t = grain_table(img, labels=labels_full, pixel_um=pixel_um)
     n = len(t['label'])

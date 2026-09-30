@@ -26,13 +26,19 @@ def main():
     ap.add_argument('--preset', choices=list(PRESETS), default='quick')
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--out', default=None)
+    ap.add_argument('--relabel', action='store_true',
+                    help='keep the rendered maps of an existing dataset.npz and only recompute the proxy labels')
     args = ap.parse_args()
     cfg = PRESETS[args.preset]
     out = args.out or os.path.join(os.path.dirname(__file__), '..', 'work', args.preset)
     os.makedirs(out, exist_ok=True)
     t0 = time.time()
-    images, states = make_dataset(seed=args.seed, H=cfg['H'], W=cfg['W'], pixel_um=cfg['pixel_um'])
-    print(f'rendered {len(images)} maps in {time.time() - t0:.0f}s')
+    if args.relabel:
+        images = np.load(os.path.join(out, 'dataset.npz'))['images'].astype(np.float32) / 255.0
+        states = json.load(open(os.path.join(out, 'dataset_info.json')))['states']
+    else:
+        images, states = make_dataset(seed=args.seed, H=cfg['H'], W=cfg['W'], pixel_um=cfg['pixel_um'])
+    print(f'{len(images)} maps ready in {time.time() - t0:.0f}s')
     real = np.genfromtxt(os.path.join(os.path.dirname(__file__), '..', 'data', 'official', 'dataset.csv'),
                          delimiter=',', skip_header=1)[:, 4:6]
     props = []

@@ -33,6 +33,9 @@ def safe_properties(img, pixel_um, return_curve=False):
         return (np.nan, np.nan, nan_curve) if return_curve else (np.nan, np.nan)
 
 
+SEG = 'watershed'   # common grain segmentation for originals and reconstructions (see features.segment_grains)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--work', default='work/quick')
@@ -44,7 +47,10 @@ def main():
     ap.add_argument('--no-ddpm', action='store_true')
     ap.add_argument('--vae', default=None, help='default: vae_curriculum if present, else vae_full')
     ap.add_argument('--pc-study', type=int, nargs='*', default=[1, 2, 3, 6, 12, 24])
+    ap.add_argument('--seg', choices=['watershed', 'dark'], default='watershed')
     args = ap.parse_args()
+    global SEG
+    SEG = args.seg
     os.makedirs(args.out, exist_ok=True)
     P.setup()
     plt = P.plt
@@ -71,7 +77,7 @@ def main():
     # Supp. Fig. 10: how many PCs are needed to regenerate a faithful microstructure?
     if args.pc_study:
         rng = np.random.default_rng(0)
-        Fo = np.array([mean_features(p, pixel_um=pixel_um) for p in patches.astype(np.float32) / 255.0])
+        Fo = np.array([mean_features(p, pixel_um=pixel_um, method=SEG) for p in patches.astype(np.float32) / 255.0])
         Fo_map = np.nanmean(Fo.reshape(25, 80, -1), 1)
         errs = {}
         for k in args.pc_study:
@@ -80,7 +86,7 @@ def main():
             e = []
             for m in range(25):
                 imgs = quantize(decode(vae, sample_latents(mu_k[m], sd_k[m], 80, rng), None, out_size=patch))
-                Fg = np.nanmean([mean_features(im, pixel_um=pixel_um) for im in imgs], 0)
+                Fg = np.nanmean([mean_features(im, pixel_um=pixel_um, method=SEG) for im in imgs], 0)
                 e.append(np.abs(Fg[:3] - Fo_map[m, :3]) / Fo_map[m, :3])
             errs[k] = float(np.mean(e))
             print(f'PCs {k:2d}: mean relative error of morphology features {errs[k]:.3f}', flush=True)
@@ -178,17 +184,17 @@ def main():
 
     # Fig. 5a-d: generated vs original patches and grain-area distributions
     orig = patches.astype(np.float32) / 255.0
-    a_orig = np.concatenate([grain_table(p, pixel_um=pixel_um)['area'] for p in orig])
-    a_gen = np.concatenate([grain_table(p, pixel_um=pixel_um)['area'] for p in gen_patches.reshape(-1, patch, patch, 3)])
+    a_orig = np.concatenate([grain_table(p, pixel_um=pixel_um, method=SEG)['area'] for p in orig])
+    a_gen = np.concatenate([grain_table(p, pixel_um=pixel_um, method=SEG)['area'] for p in gen_patches.reshape(-1, patch, patch, 3)])
     fine = np.median(a_orig) / 4            # same 'fine grain' threshold for both populations
     st_o, st_g = size_distribution_stats(a_orig, fine_um2=fine), size_distribution_stats(a_gen, fine_um2=fine)
     metrics['grain_area'] = dict(original=st_o, generated=st_g)
-    per_map = [size_distribution_stats(np.concatenate([grain_table(p, pixel_um=pixel_um)['area']
+    per_map = [size_distribution_stats(np.concatenate([grain_table(p, pixel_um=pixel_um, method=SEG)['area']
                                                        for p in crop_patches(im, patch)]))['bimodality']
                for im in d['images'].astype(np.float32) / 255.0]
     metrics['bimodality_per_training_map'] = per_map
     metrics['bimodality_per_generated_map'] = [
-        size_distribution_stats(np.concatenate([grain_table(p, pixel_um=pixel_um)['area'] for p in gp]))['bimodality']
+        size_distribution_stats(np.concatenate([grain_table(p, pixel_um=pixel_um, method=SEG)['area'] for p in gp]))['bimodality']
         for gp in gen_patches]
     fig = plt.figure(figsize=(11, 5.6))
     gs = fig.add_gridspec(2, 8)
