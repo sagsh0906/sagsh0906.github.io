@@ -38,13 +38,14 @@ from matbrain.prompts import MAT_R1_SYSTEM
 BENCHMARK_CATEGORIES = [GENERATION, VALIDATION, ANALYSIS, COMPUTATION]
 
 
-def benchmark_registry() -> ToolRegistry:
+def benchmark_registry(tools: list[str] | None = None) -> ToolRegistry:
     if not os.environ.get("MATBRAIN_REFERENCE_ENTRIES"):
         warnings.warn(
             "MATBRAIN_REFERENCE_ENTRIES is not set: phase_diagram_ehull would query live MP reference entries, "
             "which can contain held-out materials. Build a training-split snapshot with scripts/build_reference_entries.py."
         )
-    return load_registry().subset(categories=BENCHMARK_CATEGORIES, disable_target_db=True)
+    pool = tools or [t for t in os.environ.get("MATBRAIN_TOOL_POOL", "").split(",") if t]
+    return load_registry().subset(include=pool or None, categories=BENCHMARK_CATEGORIES, disable_target_db=True)
 
 
 def tool_prompt(task: dict[str, Any]) -> str:
@@ -119,13 +120,14 @@ def main() -> None:
     ap.add_argument("--limit", type=int)
     ap.add_argument("--concurrency", type=int, default=8)
     ap.add_argument("--out-dir", default="results/benchmark")
+    ap.add_argument("--tools", nargs="*", help="restrict the shared tool pool (default: MATBRAIN_TOOL_POOL or all non-DB tools)")
     args = ap.parse_args()
 
     tasks = [t for t in iter_records(args.tasks) if not args.families or t["family"] in args.families]
     tasks = tasks[: args.limit] if args.limit else tasks
     cfg = yaml.safe_load(open(args.config)) if os.path.exists(args.config) else {"systems": {}}
     system = load_system(cfg, args.system, args.mode)
-    registry = benchmark_registry()
+    registry = benchmark_registry(args.tools)
     os.makedirs(args.out_dir, exist_ok=True)
     tag = f"{args.system}__{args.mode}"
     pred_path = os.path.join(args.out_dir, f"predictions__{tag}.jsonl")

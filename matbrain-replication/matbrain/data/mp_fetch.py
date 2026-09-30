@@ -89,10 +89,11 @@ def fetch(api_key: str, limit: int | None = None) -> list[dict]:
     with MPRester(api_key) as mpr:
         kw = {"num_chunks": max(1, limit // 1000), "chunk_size": min(limit, 1000)} if limit else {}
         summaries = [_dump(d) for d in mpr.materials.summary.search(fields=SUMMARY_FIELDS, **kw)]
-        ids = [str(d["material_id"]) for d in summaries]
-        created = {str(_dump(d)["material_id"]): _dump(d).get("created_at") for d in mpr.materials.search(material_ids=ids, fields=["material_id", "created_at"])}
+        # Full pulls fetch every core/provenance doc directly instead of passing ~150k ids.
+        by_id = {"material_ids": [str(d["material_id"]) for d in summaries]} if limit else {}
+        created = {str(_dump(d)["material_id"]): _dump(d).get("created_at") for d in mpr.materials.search(fields=["material_id", "created_at"], **by_id)}
         prov = {}
-        for d in mpr.materials.provenance.search(material_ids=ids, fields=["material_id", "references", "created_at"]):
+        for d in mpr.materials.provenance.search(fields=["material_id", "references", "created_at"], **by_id):
             d = _dump(d)
             prov[str(d["material_id"])] = d
     records = []

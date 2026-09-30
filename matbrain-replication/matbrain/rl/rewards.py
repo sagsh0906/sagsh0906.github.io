@@ -112,12 +112,22 @@ class _KnownHandles:
         return handle.strip() in self.handles
 
 
+@lru_cache(maxsize=1)
+def _pool_registry():
+    """The tool pool exposed during RL. MATBRAIN_TOOL_POOL (comma-separated names,
+    printed by training/rl/make_tool_config.py) restricts it so that a call to a
+    registered tool that was not offered to the policy does not count as valid."""
+    from matbrain.mcp import load_registry
+
+    registry = load_registry()
+    pool = [t.strip() for t in os.environ.get("MATBRAIN_TOOL_POOL", "").split(",") if t.strip()]
+    return registry.subset(include=pool) if pool else registry
+
+
 def syntax_reward(steps: list[Step], registry=None, prompt: str = "", strict_handles: bool = True) -> tuple[float, int, int]:
     """Eq. 5. Returns (reward, n_valid, M)."""
     if registry is None:
-        from matbrain.mcp import load_registry
-
-        registry = load_registry()
+        registry = _pool_registry()
     known = set(HANDLE_RE.findall(prompt))
     valid = total = 0
     for step in steps:

@@ -15,7 +15,7 @@ import inspect
 from typing import Annotated, Any
 
 from matbrain.mcp import load_registry
-from matbrain.mcp.registry import ToolRegistry, ToolSpec
+from matbrain.mcp.registry import ToolRegistry, ToolSpec, flatten_schema
 
 try:  # mcp >= 2
     from mcp.server.mcpserver import MCPServer as _Server
@@ -50,11 +50,17 @@ def _make_handler(registry: ToolRegistry, spec: ToolSpec, max_chars: int):
     return handler
 
 
-def build_server(registry: ToolRegistry | None = None, name: str = "Mat-MCP", max_chars: int = 8000, **server_kwargs):
+def build_server(registry: ToolRegistry | None = None, name: str = "Mat-MCP", max_chars: int = 8000, flat_schemas: bool = False, **server_kwargs):
+    """``flat_schemas=True`` publishes {type, description, enum} per argument: verl's
+    MCP client (OpenAIFunctionToolSchema) rejects properties without a ``type``,
+    e.g. the ``anyOf`` Pydantic emits for optional arguments. Validation is
+    unchanged either way (it runs on the Pydantic models)."""
     registry = registry or load_registry()
     server = _Server(name, **server_kwargs)
     for spec in registry:
         server.add_tool(_make_handler(registry, spec, max_chars), name=spec.name, description=spec.description)
+        if flat_schemas:
+            server._tool_manager.get_tool(spec.name).parameters = flatten_schema(spec.json_schema())
     return server
 
 
@@ -66,17 +72,18 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--disable-target-db", action="store_true", help="exclude MP/OQMD lookup tools (leakage-controlled benchmark)")
     ap.add_argument("--tools", nargs="*", help="explicit subset of tool names")
     ap.add_argument("--max-observation-chars", type=int, default=8000)
+    ap.add_argument("--flat-schemas", action="store_true", help="publish verl-compatible flat argument schemas")
     args = ap.parse_args(argv)
 
     registry = load_registry().subset(include=args.tools, disable_target_db=args.disable_target_db)
     if _MCP_V2:
-        server = build_server(registry, max_chars=args.max_observation_chars)
+        server = build_server(registry, max_chars=args.max_observation_chars, flat_schemas=args.flat_schemas)
         if args.transport == "stdio":
             server.run("stdio")
         else:
             server.run(args.transport, host=args.host, port=args.port)
     else:
-        server = build_server(registry, max_chars=args.max_observation_chars, host=args.host, port=args.port)
+        server = build_server(registry, max_chars=args.max_observation_chars, flat_schemas=args.flat_schemas, host=args.host, port=args.port)
         server.run(args.transport)
 
 

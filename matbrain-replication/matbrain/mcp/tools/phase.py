@@ -154,10 +154,10 @@ def candidate_entry(structure=None, formula=None, energy_per_atom=None, energy_m
         comp = Composition(formula)
         return PDEntry(comp, energy_per_atom * comp.num_atoms, name=comp.reduced_formula)
     if energy_per_atom is None:
-        from matbrain.mcp.tools.properties import relax_with_matgl, static_energy_per_atom
+        from matbrain.mcp.tools.properties import relax_with_potential, static_energy_per_atom
 
         if relax:
-            structure, energy_per_atom, _ = relax_with_matgl(structure, energy_model)
+            structure, energy_per_atom, _ = relax_with_potential(structure, energy_model)
         else:
             energy_per_atom = static_energy_per_atom(structure, energy_model)
         if apply_mp2020:

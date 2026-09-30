@@ -64,3 +64,16 @@ def test_mcp_server_roundtrip(registry):
 
     payload = asyncio.run(go())
     assert payload["status"] == "success" and payload["result"]["value"] == 5.5
+
+
+def test_flat_schemas_for_verl_mcp_client(registry):
+    """verl's MCP client validates every property against {type, description, enum}."""
+    srv = build_server(registry, flat_schemas=True)
+    tools = asyncio.run(srv.list_tools())
+    for t in tools:
+        schema = t.input_schema if hasattr(t, "input_schema") else t.inputSchema
+        for prop in schema["properties"].values():
+            assert "type" in prop, (t.name, prop)
+    # arguments are still validated by the Pydantic models
+    out = asyncio.run(srv.call_tool("check_charge_balance", {"formula": "V2Fe6S4"}))
+    assert '"charge_balanced": false' in out.content[0].text

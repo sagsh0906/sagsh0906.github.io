@@ -230,6 +230,7 @@ def main() -> None:
         n = asyncio.run(run(chunks, lambda c: distil_chunk(c, teachers["question"], teachers["answer"], teachers["judge"], args.questions_per_chunk, args.threshold, strict), args.out, args.concurrency))
     else:
         recs = list(iter_records(args.records))
+        random.Random(args.seed).shuffle(recs)  # the split is time-ordered; sample across it
         recs = recs[: args.limit] if args.limit else recs
         r1 = None if args.template_only else teachers["answer"]
         judge = None if args.template_only else teachers.get("judge")

@@ -67,7 +67,7 @@ tests/                    # pytest（CPU，无需网络）
 cd matbrain-replication
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[agent,data,dev]"
-pytest -q                          # 43 个测试
+pytest -q                          # 45 个测试
 python scripts/demo_offline.py     # 用脚本化策略回放 Fig. 5b 的 CsPb(Cl0.2Br0.4I0.4)3 案例，工具调用是真实执行的
 ```
 
@@ -87,6 +87,8 @@ python scripts/report_benchmark.py --dir /tmp/results
 ```
 
 ## 5. 完整复现路线
+
+> 先做小规模验证：一张 80GB 显卡、3–5 天、约 ¥1–3 千跑通全流程，逐步命令和验收清单见 [docs/small_scale_validation.md](docs/small_scale_validation.md)。
 
 ### 5.1 数据（Mat-SFT → Mat-252K-SFT、Mat-20K-RL、基准）
 
@@ -208,7 +210,7 @@ python -m matbrain.experiments.nrr --absorbance 0.21 --charge 1.3 --e-ag-agcl -0
 9. **Fermi 能工具**：论文说大多数控制器用了"同一个确定性后端"，但没说是什么。这里提供 `predict_property_custom`，可以接入你自己在 MP efermi 上训练的 MatGL 模型（`MATBRAIN_EFERMI_MODEL`）。
 10. **提示词**：论文未公开，`matbrain/prompts.py` 按 Methods 的描述重写。
 11. **CrystaLLM / MatterGen 封装**：分别调用上游的 `bin/sample.py` 和 `mattergen-generate` CLI；上游参数可能随版本变化，使用前请对照你的版本。
-12. **MatGL 模型命名**：不同版本名称不同，代码会依次尝试新旧名称，也可以用环境变量覆盖。
+12. **势函数与 MatGL 模型**：默认势函数用独立的 `chgnet` 包（v0.3.0，权重随 pip 包附带，MPtrj 训练，能量与 MP 兼容，E_hull 依赖这一点）。MatGL ≥ 3.0 的权重全部改从 Hugging Face `materialyze` 下载，名称也变了，且其 M3GNet/TensorNet 势函数改为 MatPES 训练、与 MP2020 修正不兼容；代码会依次尝试新旧名称，也可以用 `MATBRAIN_<类型>_<模型>_MODEL` 环境变量指定。
 13. **Ehull 与泄漏**：相图参考集用训练集快照（`MATBRAIN_REFERENCE_ENTRIES`），否则在线 MP 参考集里可能包含测试集材料本身。ML 能量默认加 MP2020 修正后再与 MP 参考比较。
 14. **MatBrain 入口**：Methods 写的是从执行节点（Mat-T1）开始；Fig. 1b 画了 Mat-R1 的初始分析。默认按 Methods，`start_with_analysis: true` 切换到 Fig. 1b 的流程。
 
@@ -227,4 +229,4 @@ python -m matbrain.experiments.nrr --absorbance 0.21 --charge 1.3 --e-ag-agcl -0
 | 筛选漏斗 | 30,000 → 26,973 → 21,954 → 10,452 → 10,128 → 42 → 42 → 38 |
 | CoV4S8 NRR | −0.55 V 时 NH3 产率 34.6 µg h⁻¹ mg⁻¹；−0.35 V 时 FE 4.3% |
 
-本环境（无 GPU、只能访问 PyPI）中已经验证的内容：43 个单元测试；Fig. 5b 的 Vegard 晶格常数、体积、t、μ；V2Fe6S4 被价态过滤剔除；CsPb(Cl0.2Br0.4I0.4)3 的整数近似 Cs5Pb5Cl3Br6I6；MCP server 往返调用；奖励函数与手算一致；玩具数据上的切分→审计→基准→评测→报告全流程。**模型训练、模型对比和熵分析的数值都还没有跑，需要 GPU 与数据。**
+本环境（无 GPU、只能访问 PyPI）中已经验证的内容：45 个单元测试；CHGNet 能量、弛豫、磁矩与 E_hull 工具的真实调用；verl v0.6.1 的 MCP 客户端逻辑能解析并调用 Mat-MCP 的全部工具；Fig. 5b 的 Vegard 晶格常数、体积、t、μ；V2Fe6S4 被价态过滤剔除；CsPb(Cl0.2Br0.4I0.4)3 的整数近似 Cs5Pb5Cl3Br6I6；MCP server 往返调用；奖励函数与手算一致；玩具数据上的切分→审计→基准→评测→报告全流程。**模型训练、模型对比和熵分析的数值都还没有跑，需要 GPU 与数据。**

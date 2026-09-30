@@ -75,3 +75,16 @@ def test_verl_entry_point():
     out = compute_score("mat20k_rl", "<think>a</think><answer>b</answer>", "", {"prompt_text": ""})
     assert set(out) >= {"score", "acc", "turns", "think", "format", "syntax"}
     assert out["score"] == out["acc"]
+
+
+def test_syntax_reward_respects_tool_pool(monkeypatch):
+    from matbrain.rl import rewards
+
+    t = "<think>x</think>" + tc("check_charge_balance", formula="NaCl") + resp("ok") + "<think>y</think><answer>a</answer>"
+    rewards._pool_registry.cache_clear()
+    monkeypatch.setenv("MATBRAIN_TOOL_POOL", "validate_structure")
+    assert compute_reward(t).syntax == 0.0  # registered, but not offered to the policy
+    rewards._pool_registry.cache_clear()
+    monkeypatch.delenv("MATBRAIN_TOOL_POOL")
+    assert compute_reward(t).syntax == 1.0
+    rewards._pool_registry.cache_clear()

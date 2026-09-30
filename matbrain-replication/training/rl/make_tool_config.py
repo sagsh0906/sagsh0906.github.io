@@ -30,11 +30,12 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     ap.add_argument("--mcp-url", default="http://127.0.0.1:8000/mcp")
     ap.add_argument("--disable-target-db", action="store_true")
+    ap.add_argument("--include", nargs="*", help="explicit tool subset (default: all registered tools)")
     ap.add_argument("--exclude", nargs="*", default=["vasp_prepare_inputs", "mattergen_generate"])
     ap.add_argument("--max-observation-chars", type=int, default=4000)
     args = ap.parse_args()
 
-    registry = load_registry().subset(exclude=args.exclude, disable_target_db=args.disable_target_db)
+    registry = load_registry().subset(include=args.include, exclude=args.exclude, disable_target_db=args.disable_target_db)
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     if args.mode == "local":
         tools = [
@@ -62,6 +63,8 @@ def main() -> None:
     with open(args.out, "w") as fh:
         yaml.safe_dump(cfg, fh, sort_keys=False, allow_unicode=True, width=120)
     print(f"wrote {len(registry)} tools to {args.out}")
+    # The syntax reward must score against the same pool the policy sees.
+    print(f"export MATBRAIN_TOOL_POOL={','.join(registry.names())}")
 
 
 if __name__ == "__main__":

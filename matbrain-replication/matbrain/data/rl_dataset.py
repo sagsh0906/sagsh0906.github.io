@@ -90,6 +90,8 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=20000)
     ap.add_argument("--val", type=int, default=200)
     ap.add_argument("--artifact-dir", default=os.environ.get("MATBRAIN_ARTIFACT_DIR", "data/rl/artifacts"))
+    ap.add_argument("--tasks", nargs="*", help="keep only these task prefixes, e.g. property: (skip structure_generation when CrystaLLM is not installed)")
+    ap.add_argument("--uniform", action="store_true", help="sample tasks uniformly instead of preferring high-complexity ones")
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
@@ -99,9 +101,10 @@ def main() -> None:
 
     store = ArtifactStore(args.artifact_dir)
     rng = random.Random(args.seed)
-    recs = [r for r in iter_records(args.sft) if r.get("task")]
+    recs = [r for r in iter_records(args.sft) if r.get("task") and (not args.tasks or r["task"].startswith(tuple(args.tasks)))]
     rng.shuffle(recs)
-    recs.sort(key=lambda r: -complexity(r["task"]))  # stable: shuffled within tiers
+    if not args.uniform:
+        recs.sort(key=lambda r: -complexity(r["task"]))  # stable: shuffled within tiers
     rows = []
     for rec in recs:
         row = to_rl_row(rec, len(rows), "train", store)
