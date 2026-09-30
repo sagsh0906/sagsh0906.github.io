@@ -55,6 +55,7 @@ def main():
     ap.add_argument('--kl-warmup-epochs', type=float, default=4.0,
                     help='linearly ramp the KL weight from 0 over this many epochs (avoids posterior collapse)')
     ap.add_argument('--n-test', type=int, default=1000)
+    ap.add_argument('--init', default=None, help='warm-start from a VAE checkpoint (e.g. the pixel-loss model)')
     ap.add_argument('--threads', type=int, default=4)
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
@@ -76,7 +77,10 @@ def main():
     tr_eval_loader = DataLoader(Subset(ds_tr, tr_eval_idx), batch_size=args.batch)
     print(f'train pairs {len(ds_tr)}, test pairs {len(ds_te)}, patch {patch}px -> input {img_size}px')
 
-    model = PhysicsVAE(img_size=img_size).to(args.device)
+    model = PhysicsVAE(img_size=img_size)
+    if args.init:
+        model.load_state_dict(torch.load(args.init, map_location='cpu')['state_dict'])
+    model = model.to(args.device)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=0.0)
     terms = ('pix', 'edge', 'ssim') if args.loss == 'full' else ('pix',)
