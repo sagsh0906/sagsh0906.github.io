@@ -80,16 +80,26 @@ def main():
     ddpm_path = os.path.join(args.work, 'ddpm', 'ddpm.pt')
     ddpm = None if args.no_ddpm or not os.path.exists(ddpm_path) else load_ddpm(ddpm_path)
 
-    cache = os.path.join(args.work, 'reconstructions.npz')
-    if os.path.exists(cache):
-        c = np.load(cache)
-        rec_f, rec_p, rec_fd = c['full'], c['pix'], (c['full_ddpm'] if 'full_ddpm' in c else None)
+    # reconstructions are cached; the VAE part is deterministic given the seed, so the DDPM refinement (computed
+    # later, once the refiner is trained) is conditioned on exactly the cached VAE outputs
+    cache_vae = os.path.join(args.work, 'reconstructions_vae.npz')
+    cache_ddpm = os.path.join(args.work, 'reconstructions_ddpm.npz')
+    if os.path.exists(cache_vae):
+        c = np.load(cache_vae)
+        rec_f, rec_p = c['full'], c['pix']
     else:
-        rec_f, rec_fd = reconstruct(vae_f, patches, ddpm)
-        rec_p, _ = reconstruct(vae_p, patches, None)
+        rec_f, _ = reconstruct(vae_f, patches, None, seed=0)
+        rec_p, _ = reconstruct(vae_p, patches, None, seed=0)
         rec_f, rec_p = quantize(rec_f), quantize(rec_p)
-        rec_fd = quantize(rec_fd) if rec_fd is not None else None
-        np.savez_compressed(cache, full=rec_f, pix=rec_p, **({'full_ddpm': rec_fd} if rec_fd is not None else {}))
+        np.savez_compressed(cache_vae, full=rec_f, pix=rec_p)
+    rec_fd = None
+    if ddpm is not None:
+        if os.path.exists(cache_ddpm):
+            rec_fd = np.load(cache_ddpm)['full_ddpm']
+        else:
+            _, rec_fd = reconstruct(vae_f, patches, ddpm, seed=0)
+            rec_fd = quantize(rec_fd)
+            np.savez_compressed(cache_ddpm, full_ddpm=rec_fd)
     models = {'pixel-loss VAE': rec_p, 'physics-aware VAE': rec_f}
     if rec_fd is not None:
         models['physics-aware VAE + DDPM'] = rec_fd
