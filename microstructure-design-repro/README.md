@@ -84,4 +84,64 @@ bash run_paper_gpu.sh
 | `scripts/inverse_design_synthetic.py` | 闭环逆向设计、解码、晶粒尺寸分布、虚拟验证、PCA 维数研究 | Fig. 4、Fig. 5、Supp. Fig. 10/14 |
 | `scripts/export_official_gbr.py` | 把作者的 sklearn 0.23 pickle 导出为可移植格式（需 sklearn 1.2.x 环境） | — |
 
-<!-- RESULTS -->
+## 5. Part A：用官方数据复现逆向设计（Fig. 4b–f）
+
+输入：`z_i.csv`（作者 VAE 编码的 25×80 个 128 维潜变量）+ `dataset.csv`（实测 YS / EL）。
+
+### 5.1 代理模型（Fig. 4b, c）
+
+![parity](results/official/fig4bc_parity.png)
+
+| | 论文 / 官方 notebook | 本复现（作者保存的 GBR） | 同一套超参数的留一法 CV | 用同样的随机搜索在 20 个随机划分上重新拟合（测试 R² 中位数） |
+|---|---|---|---|---|
+| 屈服强度 | 训练 0.963 / 测试 0.961 | **0.963 / 0.961** | 0.23 | 0.17（IQR −0.39…0.48，0/20 次 > 0.92） |
+| 延伸率 | 训练 0.929 / 测试 0.922 | **0.929 / 0.922** | 0.29 | 0.21（IQR −0.61…0.49，0/20 次 > 0.92） |
+
+* 作者保存的模型在同一描述子上**逐位复现**了论文数值，说明描述子（均值 / 标准差 → PCA 3+3）的计算与原作一致。
+* **稳健性提醒**：测试集只有 5 个合金。作者保存的 `RandomizedSearchCV` 对象里记录的内部交叉验证 R²（YS 为 4 折，EL 为 5 折）只有 **0.10（YS）和 −0.69（EL）**；用同一套超参数做留一法 CV 只有 0.23 / 0.29；按官方 notebook 流程在其它随机划分上重新搜索，测试 R² 的中位数约 0.2，20 次里没有一次达到 0.92（`results/official/surrogate_split_robustness.png`）。所以论文报告的 R² > 0.92 很大程度上取决于"种子 75 / 98"这组有利的划分，不宜当作泛化精度来理解。
+* 另一个细节：从树的初始常数可以反推出，作者的 EL 模型实际上是在**种子 75** 的训练集上拟合的，而 notebook 用**种子 98** 的划分评估它（5 个"测试"样本里有 3 个其实在训练集中）。在它真正留出的 5 个样本上 R² = 0.925，与报告值接近，所以不影响结论，这里只作记录。
+* scikit-learn ≥ 1.5 修改了 PCA 的 `svd_flip` 符号约定，会把 μ 描述子第 3 主成分的符号翻转，导致作者的树模型在该轴上失效（R² 从 0.963 掉到 0.956）。`DescriptorPCA` 显式恢复了旧约定。
+
+### 5.2 NSGA-II 与 ΔHV（Fig. 4d–f）
+
+| ΔHV 曲线 | 生成解在 PC 空间的位置 | 最终候选 |
+|---|---|---|
+| ![dhv](results/official/fig4d_delta_hv.png) | ![pc1](results/official/fig4e_pc1.png) | ![pareto](results/official/fig4f_pareto.png) |
+
+* 参考点 = 原始数据的最小值 (362.26 MPa, 32.69 %)，HV<sub>0</sub> = 2620 MPa·%。种子 212（官方 notebook 所用）的最终 ΔHV = 4678；11 个种子平均为 4483 ± 361。
+* 论文中 ΔHV 约在 150 代后进入平台；本复现约 **19 代**就达到最终值的 95 %。原因是 GBR 是分段常数函数，在 6 维盒子里很快就能找到最优叶子组合，之后的波动来自拥挤度替换。
+* 最优的不同候选：**① 679 MPa / 63.8 %**，**② 643 MPa / 66.9 %**，另有 883 MPa / 48.2 %，均位于原始 Pareto 前沿之外（强度-塑性协同），与论文 Fig. 4f 的结论一致。几乎所有生成解（99.9 %）都落在 25 张原图的 PC 包络之外（Fig. 4e）。
+* 需要注意：GBR 无法外推，预测值不会超过训练集中最大的 YS / EL，所以"超出前沿"来自已有叶子值的新组合，并不是真正的外推。
+* 最优候选的 80×128 潜变量和 Wasserstein 代表块编号保存在 `results/official/optimized_latents.npz`。拿到作者的 VAE 权重后，`msdesign.pipeline.decode` 可以直接把它们解码成组织图。
+
+<!-- RESULTS_B -->
+
+## 7. 与论文的差异与局限（务必阅读）
+
+1. **训练数据不是真实 EBSD**。Part B 的 25 张图由 `msdesign/synthetic.py` 生成。它按论文的 25 组工艺，用 JMAK 再结晶 + 回复 + 晶粒长大的简化模型确定组织状态，再渲染成 Euler 图，外观与统计量接近真实 IN625（见 `results/synthetic/synthetic_maps.png`），但**不是**论文的数据。Part B 的数值结论只能说明"方法在这类数据上是否有效"，不能与论文逐数对比。
+2. **CPFE → 平均场晶体塑性代理**。代理模型用逐晶粒的取向、尺寸和 KAM 位错密度，可以对"晶粒细化 / 位错储存 / 双峰异构"给出定性正确的响应。它在 25 组合成图上的 YS / EL 与论文实测值的相关系数为 0.97 / 0.96，但它没有全场应力应变分配，也没有损伤模型，参数只是量级估计。
+3. **计算量**：CPU 快速预设（64 px 切片、每 epoch 抽 9 600 对、VAE 20 epoch、DDPM 12 epoch）的优化步数约为论文的 1/30，所以学习率提高到 1e-3（VAE）/ 5e-4（DDPM）；按论文设置请用 `run_paper_gpu.sh`（100 px→128 px、72 000 对 / epoch、100 epoch、lr 1e-4）。
+4. **KL 项的归一化**：论文 Eq. 11 各项等权相加，没有说明归一化方式。本实现把 KL（对 128 维求和）除以图像元素数，与逐元素平均的重建损失处于同一量级（等价于逐元素 ELBO），可用 `--kl-weight` 调整。官方 notebook 加载的是 σ-VAE（`optimal_sigma_vae`）的权重，但训练代码未公开。
+5. **DDPM 损失**：按论文 Eq. 15，在预测噪声与真实噪声之间计算 L<sub>pix</sub> + L<sub>SSIM</sub> + L<sub>edge</sub>。高斯噪声的 Sobel 响应很大，L<sub>edge</sub> 在该损失中占主导。
+6. **"GBR" 的歧义**：论文 Results 部分写作 "Gaussian process regression (GBR)"，Methods 和官方代码都是 Gradient Boosting Regression。本仓库默认用 GBR（Gradient Boosting），`--surrogate gpr` 可切换到高斯过程作对照。
+7. **未复现**：WGAN / 标准 DDPM 基线（Supp. Fig. 7）、Inception-v3 FD 指标、实验合成验证、ResNet-18 GND 模型（以 KAM 代替）。
+
+## 8. 用你自己的 EBSD 数据
+
+1. 把每张 Euler 图导出为 RGB（R=φ1/360°，G=Φ/90°，B=φ2/90°，立方晶系约化区，晶界画成黑色；与 Channel 5 默认导出一致），尺寸为 8×patch 行、10×patch 列。
+2. 仿照 `scripts/make_synthetic_dataset.py` 保存 `dataset.npz`：`images`（uint8，N×H×W×3）、`props`（N×2：YS, EL）、`train_idx`、`test_idx`、`pixel_um`、`patch`。
+3. 依次运行 `train_vae.py → train_ddpm.py → analyze_fidelity.py → inverse_design_synthetic.py`（传 `--data/--work` 指向你的目录）。`inverse_design_synthetic.py` 中的"虚拟验证"用的是 `cp_proxy`，换成真实数据后请改用你自己的 CPFE / 实验结果。
+
+## 9. 引用与许可
+
+复刻代码按 MIT 许可提供。`data/official/` 下的文件来自官方仓库（MIT，© 2026 Weijie Liao）。论文正文为 CC BY-NC-ND 4.0，本仓库不包含论文原文或图片。使用时请引用原论文：
+
+```bibtex
+@article{liao2026generative,
+  title   = {Generative design of high-fidelity microstructures using physics-aware machine learning},
+  author  = {Liao, Weijie and Li, Kaidi and Tang, Bin and Fan, Jiangkun and Wang, Jun and Xue, Xiangyi and Li, Jinshan and Yuan, Ruihao},
+  journal = {Nature Communications},
+  year    = {2026},
+  doi     = {10.1038/s41467-026-78118-3}
+}
+```
