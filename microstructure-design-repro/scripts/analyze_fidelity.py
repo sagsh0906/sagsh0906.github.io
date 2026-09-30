@@ -219,7 +219,7 @@ def main():
     mis_o = np.concatenate([neighbour_misorientations(im, method=SEG) for im in orig[is_test]] + [np.zeros(0)])
     ax.hist(mis_o, bins=bins, density=True, color=P.GRAY, alpha=0.45, label='original')
     metrics['misorientation_twin_fraction'] = {'original': float(np.mean(np.abs(mis_o - 60) < 3))}
-    for (mname, rec), col in zip(models.items(), (P.BLUE, P.ORANGE, P.AQUA)):
+    for (mname, rec), col in zip(models.items(), (P.BLUE, P.ORANGE, P.AQUA, P.VIOLET)):
         mis = np.concatenate([neighbour_misorientations(im, method=SEG) for im in rec[is_test]] + [np.zeros(0)])
         h, _ = np.histogram(mis, bins=bins, density=True)
         ax.step(bins[:-1], h, where='post', c=col, lw=1.5, label=mname)

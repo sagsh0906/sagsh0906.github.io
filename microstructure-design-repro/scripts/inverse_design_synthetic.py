@@ -233,6 +233,22 @@ def main():
         print(f"candidate {k + 1}: GBR {Ff[cand[k], 0]:.0f} MPa / {Ff[cand[k], 1]:.1f} %   "
               f"proxy on generated map {ys_map:.0f} MPa / {el_map:.1f} %", flush=True)
     metrics['validation'] = val
+    # same candidates decoded by the VAE alone (no diffusion refinement): separates refiner artefacts (speckle read
+    # as dislocation density by the KAM -> GND step) from what the optimised latent descriptors encode
+    val_vae = []
+    for k in range(len(cand)):
+        m_vae = stitch_patches(quantize(decode(vae, zs[k], None, out_size=patch)), 8, 10)
+        ys_v, el_v = safe_properties(m_vae, pixel_um)
+        val_vae.append(dict(pred_ys=float(Ff[cand[k], 0]), pred_el=float(Ff[cand[k], 1]), proxy_ys_map=ys_v,
+                            proxy_el_map=el_v))
+        print(f"candidate {k + 1}: proxy on VAE-only map {ys_v:.0f} MPa / {el_v:.1f} %", flush=True)
+    metrics['validation_vae_only'] = val_vae
+    if len(cand) > 2:
+        pred = np.array([[v['pred_ys'], v['pred_el']] for v in val])
+        for tag, vv in (('ddpm', val), ('vae_only', val_vae)):
+            got = np.array([[v['proxy_ys_map'], v['proxy_el_map']] for v in vv])
+            metrics[f'validation_corr_{tag}'] = dict(
+                ys=float(np.corrcoef(pred[:, 0], got[:, 0])[0, 1]), el=float(np.corrcoef(pred[:, 1], got[:, 1])[0, 1]))
     fig, axs = plt.subplots(1, 3, figsize=(12, 3.4), gridspec_kw=dict(width_ratios=[1.1, 1, 1]))
     P.show_images([axs[0]], [gen_maps[0]])
     axs[0].set_title('candidate 1: generated 8x10 mosaic', fontsize=9)
