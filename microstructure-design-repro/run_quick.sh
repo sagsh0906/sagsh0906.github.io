@@ -10,6 +10,10 @@ python3 scripts/make_synthetic_dataset.py --preset quick
 python3 scripts/train_vae.py --loss full --epochs 20 --lr 3e-4 --threads 2 &
 python3 scripts/train_vae.py --loss pix  --epochs 20 --lr 3e-4 --threads 2 &
 wait
-python3 scripts/train_ddpm.py --epochs 12 --lr 5e-4
+# CPU-budget curriculum: the physics-aware loss from scratch resolves boundaries but not orientations within
+# ~4k steps, so the model used downstream is warm-started from the pixel-loss VAE and fine-tuned with the full loss
+python3 scripts/train_vae.py --loss full --init work/quick/vae_pix/vae.pt --epochs 10 --lr 3e-4 --kl-warmup-epochs 0.01 \
+    --out work/quick/vae_curriculum
+python3 scripts/train_ddpm.py --vae work/quick/vae_curriculum/vae.pt --epochs 12 --lr 5e-4
 python3 scripts/analyze_fidelity.py
 python3 scripts/inverse_design_synthetic.py

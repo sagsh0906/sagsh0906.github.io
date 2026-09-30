@@ -77,6 +77,9 @@ def main():
 
     vae_f, _ = load_vae(os.path.join(args.work, 'vae_full', 'vae.pt'))
     vae_p, _ = load_vae(os.path.join(args.work, 'vae_pix', 'vae.pt'))
+    curr_path = os.path.join(args.work, 'vae_curriculum', 'vae.pt')
+    vae_c = load_vae(curr_path)[0] if os.path.exists(curr_path) else None
+    vae_main = vae_c if vae_c is not None else vae_f       # the VAE the DDPM refiner was trained on
     ddpm_path = os.path.join(args.work, 'ddpm', 'ddpm.pt')
     ddpm = None if args.no_ddpm or not os.path.exists(ddpm_path) else load_ddpm(ddpm_path)
 
@@ -84,44 +87,47 @@ def main():
     # later, once the refiner is trained) is conditioned on exactly the cached VAE outputs
     cache_vae = os.path.join(args.work, 'reconstructions_vae.npz')
     cache_ddpm = os.path.join(args.work, 'reconstructions_ddpm.npz')
-    if os.path.exists(cache_vae):
-        c = np.load(cache_vae)
-        rec_f, rec_p = c['full'], c['pix']
-    else:
-        rec_f, _ = reconstruct(vae_f, patches, None, seed=0)
-        rec_p, _ = reconstruct(vae_p, patches, None, seed=0)
-        rec_f, rec_p = quantize(rec_f), quantize(rec_p)
-        np.savez_compressed(cache_vae, full=rec_f, pix=rec_p)
+    cached = dict(np.load(cache_vae)) if os.path.exists(cache_vae) else {}
+    for key, vae in (('full', vae_f), ('pix', vae_p), ('curr', vae_c)):
+        if vae is not None and key not in cached:
+            cached[key] = quantize(reconstruct(vae, patches, None, seed=0)[0])
+            np.savez_compressed(cache_vae, **cached)
     rec_fd = None
     if ddpm is not None:
         if os.path.exists(cache_ddpm):
             rec_fd = np.load(cache_ddpm)['full_ddpm']
         else:
-            _, rec_fd = reconstruct(vae_f, patches, ddpm, seed=0)
+            _, rec_fd = reconstruct(vae_main, patches, ddpm, seed=0)
             rec_fd = quantize(rec_fd)
             np.savez_compressed(cache_ddpm, full_ddpm=rec_fd)
-    models = {'pixel-loss VAE': rec_p, 'physics-aware VAE': rec_f}
+    models = {'pixel-loss VAE': cached['pix'], 'physics-aware VAE (from scratch)': cached['full']}
+    if 'curr' in cached:
+        models['physics-aware VAE (pixel warm start)'] = cached['curr']
     if rec_fd is not None:
         models['physics-aware VAE + DDPM'] = rec_fd
     orig = patches.astype(np.float32) / 255.0
     metrics = {'image_losses_test': {m: image_losses(r[is_test], orig[is_test]) for m, r in models.items()}}
     print(json.dumps(metrics, indent=1))
 
-    # ---- Fig. 2a, b: loss curves
-    hist = {k: json.load(open(os.path.join(args.work, f'vae_{k}', 'history.json'))) for k in ('pix', 'full')}
-    fig, axs = plt.subplots(1, 2, figsize=(8, 3.1), sharey=False)
-    for ax, key, title in ((axs[0], 'pix', r'Trained with $L_{pix}$ only'),
-                           (axs[1], 'full', r'Trained with $L_{pix}+L_{edge}+L_{SSIM}$')):
-        h = hist[key]
-        ep = [r['epoch'] for r in h]
-        comps = ['pix'] if key == 'pix' else ['pix', 'edge', 'ssim']
-        for comp, col in zip(comps, (P.BLUE, P.ORANGE, P.AQUA)):
+    # ---- Fig. 2a, b: loss curves (all three terms are logged for every model, whatever it was trained on)
+    keys = [k for k in ('pix', 'full', 'curriculum') if os.path.exists(os.path.join(args.work, f'vae_{k}',
+                                                                                        'history.json'))]
+    hist = {k: json.load(open(os.path.join(args.work, f'vae_{k}', 'history.json'))) for k in keys}
+    titles = {'pix': r'trained with $L_{pix}$ only', 'full': r'$L_{pix}+L_{edge}+L_{SSIM}$ from scratch',
+              'curriculum': r'$L_{pix}$ (ep. 1-20) $\rightarrow$ full loss (ep. 21-30)'}
+    fig, axs = plt.subplots(1, len(keys), figsize=(4.1 * len(keys), 3.2), sharey=True)
+    for ax, key in zip(np.atleast_1d(axs), keys):
+        h = hist['pix'] + hist[key] if key == 'curriculum' else hist[key]
+        ep = np.arange(1, len(h) + 1)
+        for comp, col in zip(('pix', 'edge', 'ssim'), (P.BLUE, P.ORANGE, P.AQUA)):
             ax.plot(ep, [r['train'][comp] for r in h], c=col, label=f'$L_{{{comp}}}$ train')
             ax.plot(ep, [r['test'][comp] for r in h], c=col, ls='--', lw=1.4, label=f'$L_{{{comp}}}$ test')
+        if key == 'curriculum':
+            ax.axvline(20.5, c=P.GRAY, lw=1, ls=':')
         ax.set_xlabel('Epoch')
-        ax.set_ylabel('Loss')
-        ax.set_title(title)
-        ax.legend(fontsize=7, ncol=2 if key == 'full' else 1)
+        ax.set_title(titles[key], fontsize=9)
+    np.atleast_1d(axs)[0].set_ylabel('Loss')
+    np.atleast_1d(axs)[0].legend(fontsize=7, ncol=2)
     fig.tight_layout()
     fig.savefig(os.path.join(args.out, 'fig2_losses.png'))
     plt.close(fig)
@@ -131,11 +137,11 @@ def main():
     rng = np.random.default_rng(3)
     sel = rng.choice(np.nonzero(is_test)[0], 6, replace=False)
     rows = [('original', orig)] + list(models.items())
-    fig, axs = plt.subplots(len(rows), 6, figsize=(9, 1.6 * len(rows)))
+    fig, axs = plt.subplots(len(rows), 6, figsize=(9.5, 1.6 * len(rows)))
     for r, (name, imgs) in enumerate(rows):
         P.show_images(axs[r], imgs[sel])
         axs[r, 0].set_ylabel(name, rotation=0, ha='right', va='center', fontsize=8, color=P.INK2)
-    fig.subplots_adjust(wspace=0.04, hspace=0.06, left=0.2)
+    fig.subplots_adjust(wspace=0.04, hspace=0.06, left=0.28)
     fig.savefig(os.path.join(args.out, 'fig2c_reconstructions.png'))
     plt.close(fig)
 
@@ -221,13 +227,13 @@ def main():
 
     # ---- Supp. Fig. 8: latent space PCA, interpolation M1 -> M2 and extrapolation M2 -> M3
     from sklearn.decomposition import PCA
-    Z = encode(vae_f, patches)
+    Z = encode(vae_main, patches)
     pca = PCA(2).fit(Z)
     Z2 = pca.transform(Z)
     m1, m2 = sel[1], sel[2]
     alphas = np.linspace(0, 2, 21)
     path = np.array([(1 - a) * Z[m1] + a * Z[m2] for a in alphas])
-    path_imgs = quantize(decode(vae_f, path, ddpm, out_size=patch))
+    path_imgs = quantize(decode(vae_main, path, ddpm, out_size=patch))
     feats = np.array([mean_features(im, pixel_um=pixel_um) for im in path_imgs])
     ngr = [len(grain_table(im, pixel_um=pixel_um)['area']) for im in path_imgs]
     fig = plt.figure(figsize=(12, 6.2))

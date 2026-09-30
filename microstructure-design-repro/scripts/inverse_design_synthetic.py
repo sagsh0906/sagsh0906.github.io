@@ -42,6 +42,7 @@ def main():
     ap.add_argument('--seeds', type=int, nargs='+', default=[212] + list(range(5)))
     ap.add_argument('--n-candidates', type=int, default=5)
     ap.add_argument('--no-ddpm', action='store_true')
+    ap.add_argument('--vae', default=None, help='default: vae_curriculum if present, else vae_full')
     ap.add_argument('--pc-study', type=int, nargs='*', default=[1, 2, 3, 6, 12, 24])
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
@@ -51,10 +52,13 @@ def main():
     pixel_um, patch = float(d['pixel_um']), int(d['patch'])
     Y = d['props']
     patches = np.concatenate([crop_patches(im, patch) for im in d['images']])
-    vae, _ = load_vae(os.path.join(args.work, 'vae_full', 'vae.pt'))
+    vae_path = args.vae or next(p for p in (os.path.join(args.work, 'vae_curriculum', 'vae.pt'),
+                                            os.path.join(args.work, 'vae_full', 'vae.pt')) if os.path.exists(p))
+    vae, _ = load_vae(vae_path)
+    print('VAE:', vae_path)
     ddpm_path = os.path.join(args.work, 'ddpm', 'ddpm.pt')
     ddpm = None if args.no_ddpm or not os.path.exists(ddpm_path) else load_ddpm(ddpm_path)
-    metrics = dict(ddpm=ddpm is not None)
+    metrics = dict(ddpm=ddpm is not None, vae=vae_path)
 
     # 1) descriptors + PCA
     Z = encode(vae, patches)
