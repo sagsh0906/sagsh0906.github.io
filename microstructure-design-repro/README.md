@@ -33,7 +33,7 @@
 | L<sub>pix</sub>、L<sub>edge</sub>、L<sub>SSIM</sub>、KL（Eq. 1–11） | 按公式实现 | `msdesign/losses.py` | ✅ |
 | VAE 结构 | 与官方 `SigmaVAE` 完全一致 | `msdesign/models.py` | ✅ |
 | 条件 DDPM | 与官方结构一致（offset-cosine 连续噪声调度，12 通道输入 U-Net，20 步 DDIM）；**官方 `diffusVAE.pt` 可严格加载进本实现**，结构一致性已验证；训练损失按 Eq. 15 | `msdesign/models.py` | ✅ |
-| 物理特征提取（Fig. 3） | 由黑色晶界网络分割晶粒 → 面积、等效椭圆长 / 短轴、三个 Euler 角；邻晶取向差（含立方对称）；KAM | `msdesign/features.py` | ✅ |
+| 物理特征提取（Fig. 3） | 由黑色晶界网络（或颜色梯度分水岭）分割晶粒 → 面积、等效椭圆长 / 短轴、三个 Euler 角；邻晶取向差（含立方对称）；KAM | `msdesign/features.py` | ✅ |
 | 描述子 + 可逆 PCA | 同官方 notebook，并固定 PCA 符号约定（见 §5.3） | `msdesign/inverse.py` | ✅ |
 | GBR + 随机搜索 | 同官方 notebook（同样的搜索空间、cv=5、n_iter=50、划分种子 75 / 98） | `msdesign/inverse.py` | ✅ |
 | NSGA-II | 自写实现，算子与 pymoo 默认值一致（SBX η=15、PM η=20、二元锦标赛、拥挤度），可记录每一代 | `msdesign/nsga2.py` | ✅ |
@@ -67,7 +67,7 @@ pip install -r requirements.txt
 # Part A：官方数据上的逆向设计（约 6 分钟，CPU）
 python3 scripts/inverse_design_official.py            # --surrogate official|gbr|gpr
 
-# Part B：合成数据全流程（4 核 CPU 约 3 小时）
+# Part B：合成数据全流程（4 核 CPU 约 4 小时）
 bash run_quick.sh
 
 # 按论文的完整设置（800×1000、100 px→128 px、72 000 对/epoch、100 epoch），需 GPU
@@ -78,7 +78,7 @@ bash run_paper_gpu.sh
 |---|---|---|
 | `scripts/inverse_design_official.py` | Part A | Fig. 4b–f |
 | `scripts/make_synthetic_dataset.py` | 生成 25 张合成 Euler 图 + 代理模型标签 + 20/5 划分 | Supp. Fig. 1 / Table 1 |
-| `scripts/train_vae.py --loss full/pix` | 物理感知 VAE / 仅像素损失基线 | Fig. 2a,b |
+| `scripts/train_vae.py --loss full/pix [--init ckpt]` | 物理感知 VAE / 仅像素损失基线 / 课程式微调 | Fig. 2a,b |
 | `scripts/train_ddpm.py` | 条件 DDPM 细化器 | Fig. 1a |
 | `scripts/analyze_fidelity.py` | 重建对比、六特征保真度、取向差分布、潜空间插值 / 外推 | Fig. 2c、Fig. 3、Supp. Fig. 4/6/8 |
 | `scripts/inverse_design_synthetic.py` | 闭环逆向设计、解码、晶粒尺寸分布、虚拟验证、PCA 维数研究 | Fig. 4、Fig. 5、Supp. Fig. 10/14 |
@@ -114,17 +114,89 @@ bash run_paper_gpu.sh
 * 需要注意：GBR 无法外推，预测值不会超过训练集中最大的 YS / EL，所以"超出前沿"来自已有叶子值的新组合，并不是真正的外推。
 * 最优候选的 80×128 潜变量和 Wasserstein 代表块编号保存在 `results/official/optimized_latents.npz`。拿到作者的 VAE 权重后，`msdesign.pipeline.decode` 可以直接把它们解码成组织图。
 
-<!-- RESULTS_B -->
+## 6. Part B：在合成数据上跑通生成模型全链路（CPU 快速预设）
+
+设置：25 张 512×640 合成图（步长 0.78 µm，视野与论文相同，为 400×500 µm），切成 64×64 块，按原图 20 / 5 划分，训练对数与论文相同（57 600 / 14 400）。VAE 每个 epoch 随机抽 9 600 对，共 20 epoch；DDPM 12 epoch；4 核 CPU，总计约 4 小时。
+
+### 6.1 合成数据集
+
+![maps](results/synthetic/synthetic_maps.png)
+
+合成图覆盖了与论文相同的工艺区间：1050 °C 粗大退火晶粒、650–750 °C 轧制拉长的变形晶粒、850–950 °C 细晶或项链状再结晶，以及大量 Σ3 退火孪晶。代理模型给出的 YS / EL 与论文实测值的相关系数为 **0.96 / 0.95**（`results/synthetic/synthetic_vs_measured_properties.png`）。
+
+### 6.2 物理感知损失的消融（Fig. 2）
+
+![losses](results/synthetic/fig2_losses.png)
+![recon](results/synthetic/fig2c_reconstructions.png)
+
+测试集图像损失（5 张留出图的全部切片）：
+
+| 模型 | L<sub>pix</sub> | L<sub>edge</sub> | L<sub>SSIM</sub> |
+|---|---|---|---|
+| 仅 L<sub>pix</sub> 的 VAE（20 epoch） | 0.143 | 0.904 | 0.717 |
+| 物理感知 VAE，从零训练（20 epoch） | 0.211 | **0.820** | **0.622** |
+| 物理感知 VAE，先 L<sub>pix</sub> 20 epoch 再全损失 10 epoch | **0.142** | 0.866 | 0.641 |
+| 上一行 + DDPM 细化（12 epoch） | 0.157 | 0.984 | 0.729 |
+
+* **从零训练的物理感知 VAE**画出了连贯的晶界网络，而仅 L<sub>pix</sub> 的模型完全没有晶界。这与论文 Fig. 1b / 2c 的定性结论一致：L<sub>edge</sub> 和 L<sub>SSIM</sub> 迫使模型表达界面。但在约 4 000 步的 CPU 预算内，它把取向颜色压缩成了两种色调，L<sub>pix</sub> 反而更差。原因是：训练早期模糊的彩色重建在 Sobel-L1 损失下比"无边缘的平坦图"更吃亏，模型会先停留在平坦、低色彩的状态（诊断记录见提交历史）。论文用大约 115 000 步（100 epoch × 1 152 步）越过了这个阶段。
+* 学习率 1e-3 会让物理感知 VAE 发生**后验坍塌**（KL→0，输出与输入无关），加入 KL 预热也无效；3e-4 是稳定的最大值。
+* **先像素损失、再全损失**的课程式训练在三项损失上都优于仅 L<sub>pix</sub> 的模型（L<sub>pix</sub> 0.142 vs 0.143，L<sub>edge</sub> 0.866 vs 0.904，L<sub>SSIM</sub> 0.641 vs 0.717）。这在有限算力下复现了论文"联合损失不牺牲像素精度、同时改善结构"的结论，但 L<sub>pix</sub> 没有降到论文那样的一半。下游流程使用这个模型。
+* **DDPM 细化**（仅约 1 500 步）改善了 Euler 角统计，却引入了斑点噪声，没能把晶界锐化成黑线，所以三项图像损失都变差了。
+
+### 6.3 物理保真度（Fig. 3、Supp. Fig. 4 / 6）
+
+所有重建都画不出清晰的 1 px 黑线，所以原图和重建图统一用同一个"颜色梯度分水岭"算子分割晶粒（它会合并最细的晶粒和孪晶；详见 `features.segment_grains`）。下表为 5 张测试图按图聚合后的平均相对误差（Pearson r；n = 5，仅供参考）：
+
+| 模型 | 晶粒面积 | 长轴 | 短轴 | Euler1 | Euler2 | Euler3 |
+|---|---|---|---|---|---|---|
+| 仅 L<sub>pix</sub> | 0.34 | 0.20 | 0.17 | 0.12 (0.77) | 0.16 (0.54) | 0.10 (0.80) |
+| 物理感知，从零 | 0.32 | **0.12** | 0.17 | **0.04** (0.22) | 0.13 (0.47) | 0.09 (0.58) |
+| 物理感知，像素预热 | **0.23** | 0.16 | **0.12** | 0.09 (**0.86**) | **0.08** (**0.65**) | **0.06** (**0.86**) |
+| + DDPM | 1.21 | 0.37 | 0.44 | 0.26 (0.75) | 0.20 (0.69) | 0.21 (0.79) |
+
+![fid](results/synthetic/fig3_aggregate_physics_aware_VAE_(pixel_warm_start).png)
+
+| 邻晶取向差分布 | 潜空间插值 / 外推（Supp. Fig. 8） |
+|---|---|
+| ![mis](results/synthetic/misorientation.png) | ![latent](results/synthetic/latent_space.png) |
+
+* 像素预热的物理感知 VAE 在晶粒形貌和取向两方面都最好。它的邻晶取向差分布与原图几乎重合，60° 孪晶比例为 3.9 %（原图 3.1 %）；从零训练的模型为 0 %。
+* 形貌误差主要来自粗晶图：重建把大晶粒切成了若干块（上图左侧的水平带）。
+* 潜空间 PCA 图上可以看到 Euler1 的梯度（与论文 Supp. Fig. 8a 一致）。M1→M2→M3 的插值 / 外推在视觉上连续，但提取出的特征曲线噪声较大，原因是每张图的 DDPM 采样噪声相互独立，分水岭分割也比较敏感。
+
+### 6.4 闭环逆向设计（Fig. 4、Fig. 5）
+
+| 代理模型 | ΔHV | 生成组织与晶粒面积分布 | 虚拟验证 |
+|---|---|---|---|
+| ![p](results/synthetic/fig4bc_parity.png) | ![d](results/synthetic/fig4d_delta_hv.png) | ![g](results/synthetic/fig5abcd_grain_size.png) | ![v](results/synthetic/fig5gh_validation.png) |
+
+* 描述子前 3 个 PC 的解释方差：μ 为 48 %，σ 为 78 %。GBR 在代理标签上的测试 R² 为 **0.94 / 0.94**。
+* NSGA-II（种群 10，500 代，6 个种子）：HV<sub>0</sub> = 1680，最终 ΔHV = 267 ± 215，改进幅度不大。5 个候选中有 4 个重新编码后落在 25 张原图的 PC 范围之外。
+* **没有出现双峰组织**：生成图的双峰系数为 0.38–0.42，落在训练图的范围（0.33–0.65）之内；生成晶粒整体偏粗（面积中位数 256 vs 136 µm²）。论文最核心的物理发现（出现训练集中没有的双峰晶粒分布）在本设置下**未复现**。
+* **虚拟验证没有区分度**：无论目标是什么，所有候选的代理 YS / EL 都在 756–768 MPa / 41–45 % 之间，只用 VAE 解码（不经 DDPM）结果也一样。原因是生成图比原图模糊，而在 Euler 图里颜色的缓慢变化就等于晶格取向的连续变化：R 通道变化 0.02 就对应 φ1 变化 7°。KAM→GND 步骤把模糊读成了高位错密度，于是所有生成组织看起来都像重度变形组织。这说明论文流程中"从生成图推断 GND"这一步（论文用 ResNet-18）对生成器的像素级保真度要求很高。
+* Supp. Fig. 10（保留主成分数对生成保真度的影响）在本设置下是平的（相对误差 ≈ 0.34，与 PC 数无关），因为误差主要来自 VAE 解码本身的模糊，而不是描述子的截断。
+
+### 6.5 小结
+
+| 论文结论 | Part A（官方数据） | Part B（合成数据，CPU 预算） |
+|---|---|---|
+| 物理感知损失使晶界 / 取向更真实 | — | ✅ 定性复现：从零训练即可画出晶界网络；课程式训练在全部三项损失和形貌 / 取向指标上优于仅 L<sub>pix</sub> |
+| 联合训练使 L<sub>pix</sub> 降低约一半 | — | ❌ 未复现（需要约 30 倍的训练步数，见 `run_paper_gpu.sh`） |
+| 代理模型 R² > 0.92 | ✅ 作者模型逐位复现；⚠️ 对数据划分不稳健 | ✅ 0.94 / 0.94（代理标签） |
+| NSGA-II 推动 Pareto 前沿、ΔHV 趋于平台 | ✅ 候选点越过原前沿（约 19 代后进入平台，论文为约 150 代） | ✅ 有改进但幅度小 |
+| 生成训练集中没有的双峰组织 | 无法检验（缺少作者 VAE 权重） | ❌ 未出现 |
+| CPFE / 实验验证 | 无法复现 | ⚠️ 代理验证受生成图模糊影响，没有区分度 |
 
 ## 7. 与论文的差异与局限（务必阅读）
 
 1. **训练数据不是真实 EBSD**。Part B 的 25 张图由 `msdesign/synthetic.py` 生成。它按论文的 25 组工艺，用 JMAK 再结晶 + 回复 + 晶粒长大的简化模型确定组织状态，再渲染成 Euler 图，外观与统计量接近真实 IN625（见 `results/synthetic/synthetic_maps.png`），但**不是**论文的数据。Part B 的数值结论只能说明"方法在这类数据上是否有效"，不能与论文逐数对比。
-2. **CPFE → 平均场晶体塑性代理**。代理模型用逐晶粒的取向、尺寸和 KAM 位错密度，可以对"晶粒细化 / 位错储存 / 双峰异构"给出定性正确的响应。它在 25 组合成图上的 YS / EL 与论文实测值的相关系数为 0.97 / 0.96，但它没有全场应力应变分配，也没有损伤模型，参数只是量级估计。
-3. **计算量**：CPU 快速预设（64 px 切片、每 epoch 抽 9 600 对、VAE 20 epoch、DDPM 12 epoch）的优化步数约为论文的 1/30，所以学习率提高到 1e-3（VAE）/ 5e-4（DDPM）；按论文设置请用 `run_paper_gpu.sh`（100 px→128 px、72 000 对 / epoch、100 epoch、lr 1e-4）。
-4. **KL 项的归一化**：论文 Eq. 11 各项等权相加，没有说明归一化方式。本实现把 KL（对 128 维求和）除以图像元素数，与逐元素平均的重建损失处于同一量级（等价于逐元素 ELBO），可用 `--kl-weight` 调整。官方 notebook 加载的是 σ-VAE（`optimal_sigma_vae`）的权重，但训练代码未公开。
-5. **DDPM 损失**：按论文 Eq. 15，在预测噪声与真实噪声之间计算 L<sub>pix</sub> + L<sub>SSIM</sub> + L<sub>edge</sub>。高斯噪声的 Sobel 响应很大，L<sub>edge</sub> 在该损失中占主导。
-6. **"GBR" 的歧义**：论文 Results 部分写作 "Gaussian process regression (GBR)"，Methods 和官方代码都是 Gradient Boosting Regression。本仓库默认用 GBR（Gradient Boosting），`--surrogate gpr` 可切换到高斯过程作对照。
-7. **未复现**：WGAN / 标准 DDPM 基线（Supp. Fig. 7）、Inception-v3 FD 指标、实验合成验证、ResNet-18 GND 模型（以 KAM 代替）。
+2. **CPFE → 平均场晶体塑性代理**。代理模型用逐晶粒的取向、尺寸和 KAM 位错密度，可以对"晶粒细化 / 位错储存 / 双峰异构"给出定性正确的响应。它在 25 组合成图上的 YS / EL 与论文实测值的相关系数为 0.96 / 0.95，但它没有全场应力应变分配，也没有损伤模型，参数只是量级估计。
+3. **计算量与训练方式**：CPU 快速预设（64 px 切片、每 epoch 抽 9 600 对、VAE 20 epoch、DDPM 12 epoch）的优化步数约为论文的 1/30，所以学习率用 3e-4（VAE，1e-3 会坍塌）/ 5e-4（DDPM），并加入了 KL 预热（`--kl-warmup-epochs`）。下游流程用的 VAE 采用"先 L<sub>pix</sub> 20 epoch，再全损失 10 epoch"的课程式训练（`--init`），这是为了节省算力而偏离论文的做法；从零训练的全损失模型也一并给出。按论文设置请用 `run_paper_gpu.sh`（100 px→128 px、72 000 对 / epoch、100 epoch、lr 1e-4、从零训练）。
+4. **晶粒分割**：原图 / 合成图上的黑色晶界是精确的，但 CPU 预算下的重建和生成图画不出清晰的黑线。所以凡是原图与重建 / 生成图之间的比较（Fig. 3 类指标、取向差、晶粒尺寸分布、代理模型验证及其训练标签），都统一用颜色梯度分水岭算子（`segment_grains(method='watershed')`），它会合并最细的晶粒和孪晶。用 `--seg dark` 可切换回黑线分割。
+5. **KL 项的归一化**：论文 Eq. 11 各项等权相加，没有说明归一化方式。本实现把 KL（对 128 维求和）除以图像元素数，与逐元素平均的重建损失处于同一量级（等价于逐元素 ELBO），可用 `--kl-weight` 调整。官方 notebook 加载的是 σ-VAE（`optimal_sigma_vae`）的权重，但训练代码未公开。
+6. **DDPM 损失**：按论文 Eq. 15，在预测噪声与真实噪声之间计算 L<sub>pix</sub> + L<sub>SSIM</sub> + L<sub>edge</sub>。高斯噪声的 Sobel 响应很大，L<sub>edge</sub> 在该损失中占主导。
+7. **"GBR" 的歧义**：论文 Results 部分写作 "Gaussian process regression (GBR)"，Methods 和官方代码都是 Gradient Boosting Regression。本仓库默认用 GBR（Gradient Boosting），`--surrogate gpr` 可切换到高斯过程作对照。
+8. **未复现**：WGAN / 标准 DDPM 基线（Supp. Fig. 7）、Inception-v3 FD 指标、实验合成验证、ResNet-18 GND 模型（以 KAM 代替）。
 
 ## 8. 用你自己的 EBSD 数据
 

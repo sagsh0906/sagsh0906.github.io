@@ -1,5 +1,5 @@
 #!/bin/bash
-# End-to-end CPU reproduction (quick preset). Total ~3 h on 4 CPU cores.
+# End-to-end CPU reproduction (quick preset). Total ~4 h on 4 CPU cores.
 # The quick preset takes ~30x fewer optimiser steps than the paper, hence the larger learning rates (1e-3 collapses the physics-aware VAE; 3e-4 is the largest stable value).
 set -e
 cd "$(dirname "$0")"
