@@ -52,6 +52,8 @@ def main():
     ap.add_argument('--batch', type=int, default=50)
     ap.add_argument('--lr', type=float, default=1e-4)
     ap.add_argument('--kl-weight', type=float, default=1.0)
+    ap.add_argument('--kl-warmup-epochs', type=float, default=4.0,
+                    help='linearly ramp the KL weight from 0 over this many epochs (avoids posterior collapse)')
     ap.add_argument('--n-test', type=int, default=1000)
     ap.add_argument('--threads', type=int, default=4)
     ap.add_argument('--seed', type=int, default=0)
@@ -79,6 +81,8 @@ def main():
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=0.0)
     terms = ('pix', 'edge', 'ssim') if args.loss == 'full' else ('pix',)
     history = []
+    step, steps_per_epoch = 0, (args.samples_per_epoch or len(ds_tr)) // args.batch
+    warmup_steps = max(1, int(args.kl_warmup_epochs * steps_per_epoch))
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
         n = args.samples_per_epoch or len(ds_tr)
@@ -87,13 +91,15 @@ def main():
         run = 0.0
         for x_in, x in loader:
             x_in, x = x_in.to(args.device), x.to(args.device)
-            loss, parts, _ = model.loss(x_in, x, terms=terms, kl_weight=args.kl_weight)
+            beta = args.kl_weight * min(1.0, step / warmup_steps)
+            loss, parts, _ = model.loss(x_in, x, terms=terms, kl_weight=beta)
+            step += 1
             opt.zero_grad()
             loss.backward()
             opt.step()
             run += loss.item()
         sched.step()
-        rec = dict(epoch=epoch, lr=opt.param_groups[0]['lr'], train_objective=run / len(loader),
+        rec = dict(epoch=epoch, lr=opt.param_groups[0]['lr'], kl_beta=beta, train_objective=run / len(loader),
                    train=evaluate(model, tr_eval_loader, args.kl_weight, args.device),
                    test=evaluate(model, te_loader, args.kl_weight, args.device), seconds=time.time() - t0)
         history.append(rec)
